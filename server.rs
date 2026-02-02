@@ -7,6 +7,35 @@ use std::thread;
 const ROOT_DIR: &str = ".";
 const STATFILES_SUBDIR: &str = "stat_files";
 
+fn list_files(dir: &Path) -> Vec<String> {
+  let mut files = Vec::new();
+
+  if let Ok(entries) = fs::read_dir(dir) {
+    for entry in entries.flatten() {
+      let path = entry.path();
+      if path.is_file() {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+          files.push(stem.to_string());
+        }
+      }
+    }
+  }
+
+  files
+}
+
+fn mime_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html",
+        Some("js")   => "text/javascript",
+        Some("css")  => "text/css",
+        Some("json") => "application/json",
+        Some("png")  => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        _ => "application/octet-stream",
+    }
+}
+
 fn handle_client(mut stream: TcpStream) {
   let statfiles_dir = Path::new(ROOT_DIR).join(STATFILES_SUBDIR);
   println!("La directory: {}", statfiles_dir.display());
@@ -29,12 +58,42 @@ fn handle_client(mut stream: TcpStream) {
 
   match method {
     "GET" => {
+      if path == "game-list" {
+      let files = list_files(&statfiles_dir);
+      let json = format!(
+          "[{}]",
+          files
+            .iter()
+            .map(|f| format!("\"{}\"", f))
+            .collect::<Vec<_>>()
+            .join(",")
+        );
+
+        let _ = stream.write_all(format!(
+          "HTTP/1.1 200 OK\r\n\
+          Content-Type: application/json\r\n\
+          Content-Length: {}\r\n\
+          \r\n{}",
+          json.len(),
+          json
+        ).as_bytes());
+
+        return;
+      }
+    
       if fs_path.exists() && fs_path.is_file() {
         if let Ok(contents) = fs::read(&fs_path) {
+          let content_type = mime_type(&fs_path);
+
           let _ = stream.write_all(format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+            "HTTP/1.1 200 OK\r\n\
+            Content-Type: {}\r\n\
+            Content-Length: {}\r\n\
+            \r\n",
+            content_type,
             contents.len()
           ).as_bytes());
+          
           let _ = stream.write_all(&contents);
         }
       } else {
